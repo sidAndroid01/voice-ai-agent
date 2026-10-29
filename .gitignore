@@ -1,0 +1,31 @@
+# Secrets: never commit real keys (the template .env.example is kept)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local artifacts
+*.log
+dump.rdb
+recordings/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
