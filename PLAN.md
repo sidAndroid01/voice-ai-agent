@@ -14,8 +14,8 @@ Status: **v0 baseline**. We will iterate from here toward the "most optimal" ver
 | F2 | In-call memory of the whole conversation | P1 |
 | F3 | Barge-in: agent stops immediately when the user interrupts | P1 |
 | F4 | Tool calling (lookups, bookings, actions) with spoken fillers | P2 |
-| F5 | Channels: web/mobile (WebRTC) first, phone (SIP/PSTN) next | P1 / P3 |
-| F6 | Human handoff (warm transfer with summary) | P3 |
+| F5 | Channels: web and mobile apps (WebRTC). No phone calls | P1 |
+| F6 | Human handoff inside the app (support agent joins the room, or a ticket opens, with a summary) | P3 |
 | F7 | Cross-call memory (profile + last-call summary) | P3 |
 | F8 | Multilingual + mid-call code-switching (e.g. Hindi ↔ English) | P4 |
 
@@ -54,8 +54,8 @@ It is still the dominant production architecture in 2026 because tool use, struc
 ## 3. High-Level Architecture
 
 ```
- Client (Web / Mobile / Phone)
-   │  WebRTC (Opus, AEC/NS/AGC on device)  |  SIP/RTP (G.711) via telephony provider
+ Client (Web / Mobile app)
+   │  WebRTC (Opus, AEC/NS/AGC on device)
    ▼
  ┌────────────────────── Media Gateway / SFU ──────────────────────┐
  │ jitter buffer · codec transcode · resample to 16 kHz PCM · 20ms │
@@ -81,8 +81,8 @@ Key principle from the blog: **it is a real-time streaming system with a latency
 
 | Layer | v0 pick | Alternatives / notes |
 |---|---|---|
-| Framework | **LiveKit Agents** (WebRTC SFU + agent framework + built-in semantic turn detector + SIP) | Pipecat (more composable pipeline, transport-agnostic); managed: Vapi / Retell for fast prototypes |
-| Transport | WebRTC (client), SIP trunk (telephony, P3) | WebSocket only for server-to-server |
+| Framework | **LiveKit Agents** (WebRTC SFU + agent framework + built-in semantic turn detector) | Pipecat (more composable pipeline, transport-agnostic); managed: Vapi / Retell for fast prototypes |
+| Transport | WebRTC (web and mobile clients) | WebSocket only for server-to-server |
 | VAD | Silero VAD (< 1 ms per 20 ms frame) | Provider VAD |
 | Turn detection | Semantic end-of-turn model (LiveKit turn detector) **or** STT-integrated EOT (Deepgram Flux) | Dynamic silence threshold: ~200 ms if "complete", up to ~2 s if "incomplete" |
 | STT | Deepgram Nova-3 / Flux (streaming, interim + final, keyword boosting) | AssemblyAI Universal-Streaming, self-hosted Whisper/Parakeet variants for cost |
@@ -168,12 +168,11 @@ Priority: **P0** = must handle in MVP, **P1** = before production, **P2** = scal
 ### B. Audio & network
 | # | Edge case | Handling | Pri |
 |---|---|---|---|
-| B1 | Agent hears its own voice (echo) | AEC on client (WebRTC); server: drop transcripts that match recent agent output; telephony: server-side AEC | P0 |
+| B1 | Agent hears its own voice (echo) | AEC on client (WebRTC); server: drop transcripts that match recent agent output | P0 |
 | B2 | Background noise / music / crowd | Client NS; server noise suppression (e.g. Krisp-class); offer "Could you move somewhere quieter?" | P1 |
 | B3 | Too soft / too loud speech | Client AGC | P1 |
 | B4 | Packet loss / jitter | WebRTC jitter buffer + PLC; if quality metrics drop, "The line is breaking up, could you repeat?" | P1 |
 | B5 | Network drop / reconnect mid-call | Session survives N seconds; on reconnect resume from Redis checkpoint, re-sync playback | P1 |
-| B6 | 8 kHz telephony audio | Resample; use telephony-tuned STT models | P2 |
 | B7 | Bluetooth / speakerphone latency & echo | Larger AEC tail; tune barge-in thresholds per device class | P2 |
 | B8 | Clock drift on long calls | Timestamped chunks; periodic playback-position resync | P2 |
 
@@ -220,19 +219,18 @@ Priority: **P0** = must handle in MVP, **P1** = before production, **P2** = scal
 | F5 | Dead calls hogging GPU | Silence + max-duration timeouts | P0 |
 | F6 | Voice changes on provider failover | Pick matched voices across providers, or accept with no announcement | P2 |
 
-### G. Telephony-specific (P3 phase)
+### G. Handoff & payments (in-app)
+Phone calls are out of scope (web and mobile apps only), so voicemail, DTMF, SIP transfer and toll-fraud cases are dropped.
+
 | # | Edge case | Handling | Pri |
 |---|---|---|---|
-| G1 | Voicemail / answering machine on outbound | AMD; leave scripted message or hang up | P2 |
-| G2 | IVR / DTMF input | Support DTMF events as input (PINs, menus) | P2 |
-| G3 | Card numbers (PCI) | DTMF capture or pause recording; redact from transcripts/logs | P1 |
-| G4 | Warm transfer to human | LLM-generated summary passed to human agent; no repeat questions | P1 |
-| G5 | Toll fraud / outbound abuse | Rate limits, allow-lists, anomaly monitoring | P2 |
+| G3 | Card numbers (PCI) | Collect through an in-app payment form, never by voice; redact from transcripts/logs | P1 |
+| G4 | Handoff to a human | Support agent joins the LiveKit room (or a ticket opens) with an LLM-generated summary; no repeat questions | P1 |
 
 ### H. Security, privacy & compliance
 | # | Edge case | Handling | Pri |
 |---|---|---|---|
-| H1 | Caller impersonation / cloned voice | Never authenticate by voice alone; OTP / PIN / verified number | P1 |
+| H1 | Caller impersonation / cloned voice | Never authenticate by voice alone; use the logged-in app user's identity and scope every tool to their own data | P1 |
 | H2 | PII in logs & recordings | Redaction pipeline; encryption at rest; retention TTL | P1 |
 | H3 | Recording consent & AI disclosure | Announce at call start where required | P1 |
 | H4 | Multiple people on the call | "Who am I speaking with?"; diarization if needed | P2 |
@@ -259,7 +257,7 @@ Priority: **P0** = must handle in MVP, **P1** = before production, **P2** = scal
 | **P0 — Skeleton** (week 1) | LiveKit room + web client; VAD → STT → LLM → TTS streaming loop; per-turn tracing | End-to-end conversation, latency measured |
 | **P1 — Natural conversation** (weeks 2–3) | Semantic turn detection, speculative LLM, barge-in w/ buffer flush + history truncation, backchannel filter, text normalization, silence timeouts | p50 ≤ 600 ms; all P0 edge cases from §7 pass in the sim harness |
 | **P2 — Agentic** (weeks 4–5) | Tool framework (fillers, confirmations, timeouts, idempotency), RAG, guardrails, prompt-injection defenses | Tool-task completion ≥ 90 % in sim |
-| **P3 — Production** (weeks 6–8) | Telephony (SIP), Redis failover, provider fallback, PII redaction, human handoff, cross-call memory, dashboards | 99.9 % on load test; p95 ≤ 800 ms |
+| **P3 — Production** (weeks 6–8) | Redis failover, provider fallback, PII redaction, human handoff, cross-call memory, dashboards | 99.9 % on load test; p95 ≤ 800 ms |
 | **P4 — Optimal** | See §10 | |
 
 ---
@@ -280,7 +278,7 @@ Priority: **P0** = must handle in MVP, **P1** = before production, **P2** = scal
 ## 11. Open Questions (needed to finalize v1)
 
 1. **Use case / domain**: customer support, personal assistant, sales, tutoring, healthcare? (Drives tools, compliance, and cascaded-vs-S2S.)
-2. **Channels**: web/app only, or phone (PSTN) from day one?
+2. ~~**Channels**~~: decided: web and mobile apps only, no phone calls.
 3. **Languages**: English only, or Indic languages / code-switching needed?
 4. **Build vs. buy**: OSS framework (LiveKit/Pipecat) with our own infra, or managed platform (Vapi/Retell) for speed?
 5. **Hosting & budget**: cloud APIs vs. self-hosted GPUs; target cost per minute?

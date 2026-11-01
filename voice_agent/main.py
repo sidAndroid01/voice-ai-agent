@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from livekit import rtc  # noqa: E402
 from livekit.agents import (  # noqa: E402
     AgentServer,
     AgentSession,
@@ -205,15 +204,11 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.add_shutdown_callback(on_shutdown)
 
     audio_input: room_io.AudioInputOptions | bool = True
-    if settings.noise_cancellation:  # LiveKit Cloud enhanced NC (BVC); telephony-tuned for SIP
+    if settings.noise_cancellation:  # LiveKit Cloud enhanced noise cancellation (BVC)
         from livekit.plugins import noise_cancellation
 
         audio_input = room_io.AudioInputOptions(
-            noise_cancellation=lambda params: (
-                noise_cancellation.BVCTelephony()
-                if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                else noise_cancellation.BVC()
-            ),
+            noise_cancellation=noise_cancellation.BVC(),
             auto_gain_control=True,  # soft/loud talkers
         )
 

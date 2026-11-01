@@ -261,8 +261,8 @@ async def transfer_to_human(ctx: RunContext[SessionState], reason: str, summary:
             }
         },
     )
-    # Telephony: replace the hangup with a SIP REFER / warm transfer, e.g.
-    # await get_job_context().api.sip.transfer_sip_participant(...)
+    # In-app handoff: invite a human support agent into this LiveKit room (or open a ticket)
+    # with the summary above, instead of hanging up.
     _say_then_hangup(
         ctx,
         "I'm connecting you with a member of our team now. I've passed along the details, "

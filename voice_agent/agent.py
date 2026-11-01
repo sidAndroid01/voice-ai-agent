@@ -21,7 +21,7 @@ logger = logging.getLogger("voice-agent")
 _GREETING_CACHE: dict[str, list[rtc.AudioFrame]] = {}
 
 _SUMMARY_INSTRUCTIONS = (
-    "Summarize this earlier part of a customer support phone call in at most 5 short sentences. "
+    "Summarize this earlier part of a customer support voice conversation in at most 5 short sentences. "
     "Keep every concrete fact: names, order numbers, amounts, dates, decisions, actions taken, "
     "and anything still unresolved. Output plain text only."
 )
