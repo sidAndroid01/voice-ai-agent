@@ -27,7 +27,7 @@ It is built on [LiveKit Agents](https://docs.livekit.io/agents/) as a **cascaded
  │  logs · per-turn checkpoint to Redis (crash recovery)                      │
  └────────────────────────────────────────────────────────────────────────────┘
                                         │
-                          Tools (date/time, end conversation)
+          Tools (web search, weather, shell, calculator, timers, date/time)
 ```
 
 Every stage streams and stages overlap. The LLM starts drafting a reply *before* the user has definitely finished speaking, and TTS speaks the first clause while the LLM is still writing the next.
@@ -39,14 +39,14 @@ Every stage streams and stages overlap. The LLM starts drafting a reply *before*
 | VAD | Silero (local) | < 1 ms per frame |
 | Turn detection | LiveKit semantic turn detector | Tells a pause from a finished thought |
 | STT | Deepgram Nova-3 → OpenAI gpt-4o-mini-transcribe | Streaming, keyword boosting |
-| LLM | **Local** Qwen3-8B via Ollama (thinking off) → Claude Haiku 4.5 → GPT-4.1-mini | Runs on your machine with no key; cloud models are optional failover |
+| LLM | **Local** Qwen3-4B-Instruct-2507 via Ollama → Claude Haiku 4.5 → GPT-4.1-mini | Runs on your machine with no key; no hidden "thinking", ~1 s to first word on an M4. Cloud models are optional failover |
 | TTS | Deepgram Aura-2 → Cartesia Sonic-3 → ElevenLabs Flash → OpenAI | One Deepgram key covers STT and TTS |
 
 Providers without an API key are skipped automatically, and any extra keys become failover. Each chain can be changed in `.env` without touching code (`STT_CHAIN`, `LLM_CHAIN`, `TTS_CHAIN`).
 
 ## Quick start
 
-**Requirements:** Python 3.12, [uv](https://docs.astral.sh/uv/), a [Deepgram](https://deepgram.com) key (speech in and out), and [Ollama](https://ollama.com) with `ollama pull qwen3:8b` (local LLM). Console mode needs nothing else. A [LiveKit Cloud](https://cloud.livekit.io) project (free tier) or `livekit-server --dev` is needed only for browser and app clients.
+**Requirements:** Python 3.12, [uv](https://docs.astral.sh/uv/), a [Deepgram](https://deepgram.com) key (speech in and out), and [Ollama](https://ollama.com) with `ollama pull qwen3:4b-instruct-2507-q4_K_M` (local LLM). Console mode needs nothing else. A [LiveKit Cloud](https://cloud.livekit.io) project (free tier) or `livekit-server --dev` is needed only for browser and app clients.
 
 ```bash
 git clone https://github.com/sidAndroid01/voice-ai-agent.git
@@ -70,7 +70,7 @@ LIVEKIT_API_KEY=devkey        # console mode needs placeholders; real keys only 
 LIVEKIT_API_SECRET=secret
 ```
 
-Then make sure Ollama is running (`ollama serve` or the Ollama app) with `qwen3:8b` pulled.
+Then make sure Ollama is running (`ollama serve` or the Ollama app) with `qwen3:4b-instruct-2507-q4_K_M` pulled.
 
 All other settings (timeouts, interruption sensitivity, voice, agent name) are documented in [`.env.example`](.env.example).
 
@@ -92,12 +92,17 @@ All other settings (timeouts, interruption sensitivity, voice, agent name) are d
 ## What it handles
 
 - **Ask anything:** general knowledge, explanations, ideas, advice, practice conversations. Short spoken answers by default; longer when you ask for detail.
-- **Honesty:** says when it isn't sure, and that it can't check live information (news, weather, scores). Gets today's date and time from a tool instead of guessing.
+- **Tools (all keyless):**
+  - `web_search` (DuckDuckGo metasearch) for news, results and anything current.
+  - `get_weather` (OpenStreetMap + Open-Meteo).
+  - `run_shell_command` on your Mac: read-only commands run directly, anything that changes something needs a spoken "yes", and dangerous commands are always blocked.
+  - `calculate` (exact maths), `set_timer` (spoken alarm), `get_current_datetime`.
+- **Honesty:** searches instead of answering current-events questions from memory, and says when it isn't sure.
 - **Natural turn-taking:** waits through "um…" and mid-sentence pauses, and replies once a thought is finished.
 - **Interruptions:** stops speaking immediately when you talk over it, ignores coughs and "mm-hmm", and resumes after a false alarm.
 - **Silence:** waits quietly, with no "are you still there?" nagging (configurable with `MAX_SILENCE_PROMPTS`).
 - **Speakable output:** no markdown or emojis. `$45.50` becomes "forty-five dollars and fifty cents", `1653` becomes "sixteen fifty-three", codes are read digit by digit.
-- **Ending:** "bye" or "stop" ends the session through the `end_call` tool.
+- **Ending:** "bye", "that's all" or "stop it" ends the session; this is detected in code, not left to the model.
 - **Long conversations:** older turns are summarized in the background.
 - **Reliability:** provider failover at every stage, and a checkpoint after every turn so a replacement worker can resume.
 - **Privacy:** the LLM runs locally by default. Card numbers, emails, phone numbers and long digit runs are redacted from logs.
@@ -109,7 +114,6 @@ The full edge-case catalogue, with IDs, is in [PLAN.md §7](PLAN.md). Store-spec
 Scope: **general voice assistant for web and mobile apps** (no phone calls).
 
 **Next**
-- [ ] Web search tool so it can answer questions about current events
 - [ ] Lower latency: Deepgram Flux (built-in end-of-turn detection), shorter endpointing, faster local model or optional cloud LLM
 - [ ] Browser client: local `livekit-server --dev` + agents playground
 - [ ] Memory across conversations (name, preferences)

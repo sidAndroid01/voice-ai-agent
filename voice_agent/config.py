@@ -31,7 +31,7 @@ class Settings:
     )
     llm_chain: list[str] = field(
         default_factory=lambda: _list(
-            "LLM_CHAIN", "ollama:qwen3:8b,anthropic:claude-haiku-4-5,openai:gpt-4.1-mini"
+            "LLM_CHAIN", "ollama:qwen3:4b-instruct-2507-q4_K_M,anthropic:claude-haiku-4-5,openai:gpt-4.1-mini"
         )
     )
     tts_chain: list[str] = field(

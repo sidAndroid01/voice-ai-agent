@@ -33,7 +33,8 @@ _HTTP_HEADERS = {"User-Agent": "voice-ai-agent/0.1 (local voice assistant)"}
 @voice_tool(filler="Let me look that up.", timeout=10)
 async def web_search(ctx: RunContext[SessionState], query: str) -> str:
     """Search the web. Use for news, current events, recent facts, prices, sports results,
-    anything after your training data, or anything you are not sure about.
+    who currently holds any job or office (prime minister, CEO, champion), anything after your
+    training data, or anything you are not sure about. Your memory of these is out of date.
 
     Args:
         query: A short search query, like you would type into a search engine.
@@ -389,6 +390,13 @@ async def run_shell_command(ctx: RunContext[SessionState], command: str) -> str:
     info (battery, disk space, Wi-Fi, running apps), files and folders, opening apps or websites
     ("open -a Spotify", "open https://..."), volume, and anything else the user asks you to do on
     their computer. Read-only commands run immediately; others ask the user to confirm first.
+
+    Useful macOS commands: battery "pmset -g batt"; disk space "df -h /"; Wi-Fi network
+    "networksetup -getairportnetwork en0"; volume "osascript -e 'output volume of (get volume
+    settings)'"; set volume "osascript -e 'set volume output volume 50'"; running apps
+    "osascript -e 'tell application \"System Events\" to get name of every process whose
+    background only is false'"; open an app "open -a 'App Name'"; open a site "open https://...";
+    memory "vm_stat"; CPU/uptime "uptime"; OS version "sw_vers"; list a folder "ls ~/Downloads".
 
     Args:
         command: The exact shell command to run.

@@ -138,7 +138,9 @@ def voice_tool(
             for attempt in range(attempts):
                 try:
                     filler_cm = (
-                        ctx.with_filler(filler, delay=settings.tool_filler_delay) if filler else _null()
+                        ctx.with_filler(_spoken_only(ctx, filler), delay=settings.tool_filler_delay)
+                        if filler
+                        else _null()
                     )
                     async with filler_cm:
                         result = await asyncio.wait_for(
@@ -172,6 +174,13 @@ def voice_tool(
         return function_tool(wrapper, on_duplicate="reject" if side_effect else "allow")
 
     return deco
+
+
+def _spoken_only(ctx: RunContext[SessionState], text: str) -> Callable[[int], Any]:
+    """Filler speech that is heard but kept out of the chat history. Recorded fillers land between
+    a tool call and its result, which breaks the message order local models expect: they then
+    return an empty reply after the tool (seen with qwen3 after web_search)."""
+    return lambda _step: ctx.session.say(text, add_to_chat_ctx=False)
 
 
 class _null:
