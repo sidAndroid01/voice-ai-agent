@@ -29,6 +29,14 @@ from voice_agent.tools import digits_from_speech
         ("you're 1st", "you're first"),
         ("12.5% off", "twelve point five percent off"),
         ("3 items", "three items"),
+        ("built in 1653", "built in sixteen fifty-three"),
+        ("since 2024", "since twenty twenty-four"),
+        ("about 1,400,000,000 people", "about one billion, four hundred million people"),
+        (
+            "299792458 metres",
+            "two hundred and ninety-nine million, seven hundred and ninety-two thousand, "
+            "four hundred and fifty-eight metres",
+        ),
         ("a 5kg box", "a 5kg box"),
         ("mail john.doe@acme.com", "mail john dot doe at acme dot com"),
         ("see https://acme.com/help.", "see acme dot com slash help."),

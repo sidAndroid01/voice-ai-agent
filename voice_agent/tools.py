@@ -1,4 +1,4 @@
-"""Voice-safe tool layer.
+"""Voice-safe tool layer and the assistant's tools.
 
 `voice_tool` wraps a plain async function with the behaviour every voice tool needs:
   * spoken filler if the call is slow (only when the line is otherwise silent)
@@ -20,11 +20,12 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from livekit.agents import RunContext, ToolError, function_tool, get_job_context
 
-from . import backend
 from .config import load_settings
 from .state import PendingConfirmation, SessionState
 from .telemetry import redact
@@ -133,9 +134,7 @@ def voice_tool(
                             fn(ctx, **kwargs), timeout=timeout or settings.tool_timeout
                         )
                     break
-                except backend.BackendError as e:  # business-rule answer, not a failure
-                    raise ToolError(str(e)) from None
-                except ToolError:
+                except ToolError:  # a real answer for the user (e.g. a rule said no), not a failure
                     raise
                 except (TimeoutError, Exception) as e:
                     last_exc = e
@@ -172,102 +171,32 @@ class _null:
         return None
 
 
-# ------------------------------------------------------------------ domain tools
-
-
-@voice_tool(filler="Let me pull up that order.")
-async def get_order_status(ctx: RunContext[SessionState], order_id: str) -> str:
-    """Look up an order's status, items, total and delivery date.
-
-    Args:
-        order_id: The order number, digits only (convert spoken digits like "four five six" to "456").
-    """
-    oid = digits_from_speech(order_id)
-    if not oid:
-        raise ToolError("That order number didn't contain any digits. Ask the caller to repeat it.")
-    o = await backend.get_order(oid)
-    ctx.userdata.slots["order_id"] = oid
-    eta = f" Expected delivery {o.eta}." if o.eta else ""
-    return f"Order {oid}: status {o.status}; items: {', '.join(o.items)}; total ${o.total:.2f}.{eta}"
-
-
-@voice_tool(side_effect=True, confirm=True, filler="Okay, processing that now.")
-async def cancel_order(ctx: RunContext[SessionState], order_id: str) -> str:
-    """Cancel an order that has not shipped yet. Irreversible.
-
-    Args:
-        order_id: The order number, digits only.
-    """
-    return await backend.cancel_order(digits_from_speech(order_id))
-
-
-@voice_tool(filler=None, timeout=1.5)
-async def search_knowledge_base(ctx: RunContext[SessionState], query: str) -> str:
-    """Search store policies (returns, refunds, shipping, hours, warranty). Use for any policy question.
-
-    Args:
-        query: A short search query.
-    """
-    hits = await backend.search_kb(query)
-    return " ".join(hits) if hits else "No matching policy found. Do not guess; offer a human agent."
-
-
-# ------------------------------------------------------------------ call-control tools
+# ------------------------------------------------------------------ tools
 
 
 @function_tool
-async def hold_on(ctx: RunContext[SessionState]) -> str:
-    """Call when the user asks you to wait ("hold on", "give me a second", "let me find it")."""
-    ctx.userdata.on_hold_until = time.time() + load_settings().hold_timeout
-    return "Hold started. Reply with a very short acknowledgment like 'Sure, take your time.'"
+async def get_current_datetime(ctx: RunContext[SessionState]) -> str:
+    """Get the current date, time, weekday and timezone. Call this for any question about today's
+    date, the time, the day of the week, or how long until or since a date."""
+    tz_name = load_settings().timezone
+    now = datetime.now(ZoneInfo(tz_name)) if tz_name else datetime.now().astimezone()
+    return now.strftime("%A, %d %B %Y, %I:%M %p, %Z time")
 
 
 @function_tool
 async def end_call(ctx: RunContext[SessionState], farewell: str) -> None:
-    """End the call when the user says goodbye, the task is done and they need nothing else,
-    or after one warning to an abusive caller.
+    """End the conversation. Call this whenever the user says goodbye or bye, "that's all",
+    "stop", "stop it", "end this" or "I'm done". Saying goodbye without calling this leaves
+    the session open.
 
     Args:
-        farewell: One short goodbye sentence to say before hanging up.
+        farewell: One short goodbye sentence to say before ending.
     """
     state = ctx.userdata
     if state.ending:
         return None
     state.ending = True
     _say_then_hangup(ctx, farewell)
-    return None
-
-
-@function_tool
-async def transfer_to_human(ctx: RunContext[SessionState], reason: str, summary: str) -> None:
-    """Transfer to a human agent when the user asks for a person, is frustrated, or you cannot help.
-
-    Args:
-        reason: Short reason for the transfer.
-        summary: Two-sentence summary of the issue and what was already tried, for the human agent.
-    """
-    state = ctx.userdata
-    if state.transferred:
-        return None
-    state.transferred = True
-    logger.info(
-        "transfer",
-        extra={
-            "json": {
-                "call": state.call_id,
-                "reason": reason,
-                "summary": redact(summary),
-                "slots": state.slots,
-            }
-        },
-    )
-    # In-app handoff: invite a human support agent into this LiveKit room (or open a ticket)
-    # with the summary above, instead of hanging up.
-    _say_then_hangup(
-        ctx,
-        "I'm connecting you with a member of our team now. I've passed along the details, "
-        "so you won't need to repeat yourself.",
-    )
     return None
 
 
@@ -302,4 +231,4 @@ def _hangup(session: Any) -> None:
         pass
 
 
-ALL_TOOLS = [get_order_status, cancel_order, search_knowledge_base, hold_on, end_call, transfer_to_human]
+ALL_TOOLS = [get_current_datetime, end_call]

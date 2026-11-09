@@ -36,9 +36,7 @@ class SessionState:
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     # idempotency key -> result of a side-effecting tool that already ran
     completed_actions: dict[str, str] = field(default_factory=dict)
-    on_hold_until: float = 0.0
     silence_prompts: int = 0
-    transferred: bool = False
     ending: bool = False
     conversation_summary: str = ""
 

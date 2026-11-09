@@ -5,119 +5,141 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from livekit.agents import AgentSession
+from livekit.agents import AgentSession, RunContext, ToolError
 
-from voice_agent import backend
 from voice_agent.agent import VoiceAgent, ignore_reason
 from voice_agent.config import load_settings
 from voice_agent.state import SessionState
+from voice_agent.tools import voice_tool
 
 from .fakes import ScriptedLLM, ToolCall
 
+# Test-only tools: the voice_tool safety layer (confirmation, idempotency, timeouts) is generic
+# and kept for future real-world tools (smart home, messages, calendar...).
+SENT: list[str] = []
+SLOW = {"seconds": 0.0}
+
+
+@voice_tool(side_effect=True, confirm=True, filler=None)
+async def send_message(ctx: RunContext[SessionState], to: str, text: str) -> str:
+    """Send a text message. Irreversible.
+
+    Args:
+        to: Recipient name.
+        text: Message text.
+    """
+    SENT.append(f"{to}:{text}")
+    return f"Message sent to {to}."
+
+
+@voice_tool(filler=None)
+async def lookup(ctx: RunContext[SessionState], query: str) -> str:
+    """Look something up.
+
+    Args:
+        query: What to look up.
+    """
+    await asyncio.sleep(SLOW["seconds"])
+    if query == "forbidden":
+        raise ToolError("That isn't allowed.")
+    return f"result for {query}"
+
 
 @pytest.fixture(autouse=True)
-def reset_backend():
-    backend._ORDERS["12345"].status = "processing"
+def reset():
+    SENT.clear()
+    SLOW["seconds"] = 0.0
     yield
-    backend._ORDERS["12345"].status = "processing"
 
 
 def _tool_outputs(result) -> list[str]:
     return [e.item.output for e in result.events if e.type == "function_call_output"]
 
 
-async def _session(fake: ScriptedLLM, monkeypatch=None) -> tuple[AgentSession, SessionState]:
+async def _session(fake: ScriptedLLM) -> tuple[AgentSession, SessionState]:
     state = SessionState(call_id="test")
     session = AgentSession(llm=fake, vad=None, userdata=state, turn_handling={"turn_detection": "manual"})
     return session, state
 
 
-async def _start(session: AgentSession) -> None:
+async def _start(session: AgentSession) -> VoiceAgent:
     agent = VoiceAgent(load_settings())
 
     async def no_greeting() -> None:  # greeting needs TTS; not under test here
         return None
 
     agent.on_enter = no_greeting  # type: ignore[method-assign]
+    await agent.update_tools([*agent.tools, send_message, lookup])
     await session.start(agent)
+    return agent
 
 
 async def test_risky_action_needs_a_user_turn_before_executing():
     fake = ScriptedLLM(
         [
-            # turn 1: model tries to cancel immediately, then tries AGAIN in the same turn
-            ToolCall("cancel_order", order_id="12345"),
-            ToolCall("cancel_order", order_id="12345"),
-            "Just to confirm, cancel order one two three four five?",
+            # turn 1: model tries to act immediately, then tries AGAIN in the same turn
+            ToolCall("send_message", to="Mom", text="late"),
+            ToolCall("send_message", to="Mom", text="late"),
+            "Just to confirm, send Mom 'late'?",
             # turn 2: user said yes -> now it may execute
-            ToolCall("cancel_order", order_id="12345"),
-            "Done, it's cancelled.",
+            ToolCall("send_message", to="Mom", text="late"),
+            "Sent.",
             # turn 3: a repeated "yes" must not run the action twice
-            ToolCall("cancel_order", order_id="12345"),
-            "That order is already cancelled.",
-        ]
-    )
-    session, state = await _session(fake)
-    async with session:
-        await _start(session)
-
-        r1 = await session.run(user_input="Cancel my order one two three four five")
-        outs = _tool_outputs(r1)
-        assert len(outs) == 2 and all("NOT EXECUTED" in o for o in outs)
-        assert backend._ORDERS["12345"].status == "processing"
-
-        r2 = await session.run(user_input="Yes, cancel it")
-        assert "has been cancelled" in _tool_outputs(r2)[0]
-        assert backend._ORDERS["12345"].status == "cancelled"
-
-        r3 = await session.run(user_input="yes")
-        assert _tool_outputs(r3)[0].startswith("Already completed")
-
-
-async def test_spoken_order_number_is_normalized_for_lookup():
-    fake = ScriptedLLM([ToolCall("get_order_status", order_id="four five six seven eight"), "It shipped."])
-    session, state = await _session(fake)
-    async with session:
-        await _start(session)
-        r = await session.run(user_input="Where is order four five six seven eight?")
-        assert "Order 45678: status shipped" in _tool_outputs(r)[0]
-        assert state.slots["order_id"] == "45678"
-
-
-async def test_business_rule_rejection_is_relayed_not_executed():
-    fake = ScriptedLLM(
-        [
-            ToolCall("cancel_order", order_id="45678"),
-            "Confirm?",
-            ToolCall("cancel_order", order_id="45678"),
-            "Sorry, it already shipped.",
+            ToolCall("send_message", to="Mom", text="late"),
+            "Already sent.",
         ]
     )
     session, _ = await _session(fake)
     async with session:
         await _start(session)
-        await session.run(user_input="cancel order 45678")
-        r = await session.run(user_input="yes")
+
+        r1 = await session.run(user_input="Text Mom that I'm late")
+        outs = _tool_outputs(r1)
+        assert len(outs) == 2 and all("NOT EXECUTED" in o for o in outs)
+        assert SENT == []
+
+        r2 = await session.run(user_input="Yes, send it")
+        assert "Message sent" in _tool_outputs(r2)[0]
+        assert SENT == ["Mom:late"]
+
+        r3 = await session.run(user_input="yes")
+        assert _tool_outputs(r3)[0].startswith("Already completed")
+        assert SENT == ["Mom:late"]
+
+
+async def test_current_datetime_tool_returns_real_date():
+    from datetime import datetime
+
+    fake = ScriptedLLM([ToolCall("get_current_datetime"), "It's today."])
+    session, _ = await _session(fake)
+    async with session:
+        await _start(session)
+        r = await session.run(user_input="What's the date today?")
+        assert str(datetime.now().year) in _tool_outputs(r)[0]
+
+
+async def test_tool_rule_rejection_is_relayed_as_error():
+    fake = ScriptedLLM([ToolCall("lookup", query="forbidden"), "Sorry, I can't do that."])
+    session, _ = await _session(fake)
+    async with session:
+        await _start(session)
+        r = await session.run(user_input="look up forbidden")
         ev = next(e for e in r.events if e.type == "function_call_output")
-        assert ev.item.is_error and "already shipped" in ev.item.output
+        assert ev.item.is_error and "isn't allowed" in ev.item.output
 
 
 async def test_slow_tool_times_out_with_friendly_error(monkeypatch):
     monkeypatch.setenv("TOOL_TIMEOUT", "0.2")
-
-    async def slow(order_id: str):
-        await asyncio.sleep(5)
-
-    monkeypatch.setattr(backend, "get_order", slow)
-    fake = ScriptedLLM([ToolCall("get_order_status", order_id="45678"), "Sorry, the system is slow."])
+    SLOW["seconds"] = 5
+    fake = ScriptedLLM([ToolCall("lookup", query="x"), "Sorry, that's slow."])
     session, _ = await _session(fake)
     async with session:
         await _start(session)
-        r = await session.run(user_input="status of 45678")
+        r = await session.run(user_input="look up x")
         ev = next(e for e in r.events if e.type == "function_call_output")
         assert ev.item.is_error
         assert "didn't respond in time" in ev.item.output
-        assert "Timeout" not in ev.item.output  # no technical details leak to the caller
+        assert "Timeout" not in ev.item.output  # no technical details leak to the user
 
 
 @pytest.mark.parametrize(

@@ -62,7 +62,7 @@ class VoiceAgent(Agent):
                 "'Sorry about that' and continue exactly where the conversation left off."
             )
             return
-        text = GREETING.format(company=self._settings.company_name, agent=self._settings.agent_name)
+        text = GREETING.format(agent=self._settings.agent_name)
         frames = _GREETING_CACHE.get(text)
         if frames:
             self.session.say(text, audio=_replay(frames), allow_interruptions=True)
@@ -93,7 +93,6 @@ class VoiceAgent(Agent):
 
         state.user_turns += 1
         state.silence_prompts = 0
-        state.on_hold_until = 0.0
 
     # ------------------------------------------------------------------ context compaction
 

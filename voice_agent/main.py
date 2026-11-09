@@ -32,7 +32,6 @@ from .config import load_settings  # noqa: E402
 from .normalize import speech_normalizer  # noqa: E402
 from .pipeline import build_llm, build_stt, build_tts, build_turn_handling, build_vad  # noqa: E402
 from .prompts import (  # noqa: E402
-    HOLD_EXPIRED_PROMPT,
     MAX_DURATION_PROMPT,
     SILENCE_GOODBYE,
     SILENCE_PROMPT,
@@ -66,11 +65,13 @@ async def entrypoint(ctx: JobContext) -> None:
         agent = VoiceAgent(settings)
 
     vad = build_vad()
+    tts = build_tts(settings)
+    tts.prewarm()  # open the TTS connection now, not on the first reply
     session: AgentSession[SessionState] = AgentSession(
         vad=vad,
         stt=build_stt(settings, vad),
         llm=build_llm(settings),
-        tts=build_tts(settings),
+        tts=tts,
         turn_handling=build_turn_handling(settings),
         userdata=state,
         max_tool_steps=settings.max_tool_steps,
@@ -145,15 +146,8 @@ async def entrypoint(ctx: JobContext) -> None:
     silence_task: asyncio.Task | None = None
 
     async def silence_watch() -> None:
-        """Runs while the caller is silent ('away'): re-prompt, then hang up."""
+        """Runs while the user is silent ('away'): gentle prompts, then end the session."""
         while not state.ending:
-            if time.time() < state.on_hold_until:  # caller asked us to wait
-                await asyncio.sleep(state.on_hold_until - time.time())
-                if session.user_state == "away" and not state.ending:
-                    state.on_hold_until = 0.0
-                    await session.say(HOLD_EXPIRED_PROMPT)
-                    await asyncio.sleep(settings.user_away_timeout)
-                continue
             if state.silence_prompts >= settings.max_silence_prompts:
                 state.ending = True
                 await session.say(SILENCE_GOODBYE, allow_interruptions=False)
@@ -167,6 +161,8 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("user_state_changed")
     def _on_user_state(ev) -> None:
         nonlocal silence_task
+        if settings.max_silence_prompts <= 0:  # assistant mode: just wait quietly
+            return
         if ev.new_state == "away" and session.agent_state != "speaking":
             if silence_task is None or silence_task.done():
                 silence_task = asyncio.create_task(silence_watch())
@@ -184,9 +180,7 @@ async def entrypoint(ctx: JobContext) -> None:
         await asyncio.sleep(60)
         if not state.ending:
             state.ending = True
-            await session.say(
-                "I have to end the call now. Thanks for calling, goodbye!", allow_interruptions=False
-            )
+            await session.say("I have to wrap up now. Talk soon!", allow_interruptions=False)
             session.shutdown()
             ctx.delete_room()
 
@@ -199,7 +193,7 @@ async def entrypoint(ctx: JobContext) -> None:
             silence_task.cancel()
         logger.info("session summary", extra={"json": telemetry.summary()})
         TELEMETRY.pop(call_id, None)
-        if state.ending or state.transferred:  # finished normally: nothing to resume
+        if state.ending:  # finished normally: nothing to resume
             await store.delete(call_id)
 
     ctx.add_shutdown_callback(on_shutdown)

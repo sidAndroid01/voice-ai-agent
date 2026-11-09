@@ -64,8 +64,8 @@ class Settings:
 
     # --- silence / call lifecycle ---
     user_away_timeout: float = field(default_factory=lambda: _float("USER_AWAY_TIMEOUT", 8.0))
-    max_silence_prompts: int = field(default_factory=lambda: int(_env("MAX_SILENCE_PROMPTS", "2")))
-    hold_timeout: float = field(default_factory=lambda: _float("HOLD_TIMEOUT", 60.0))
+    # 0 = never nag a quiet user (assistant mode); >0 = "still there?" prompts, then end the session
+    max_silence_prompts: int = field(default_factory=lambda: int(_env("MAX_SILENCE_PROMPTS", "0")))
     max_call_duration: float = field(default_factory=lambda: _float("MAX_CALL_DURATION", 1800.0))
     transcription_timeout: float = field(default_factory=lambda: _float("TRANSCRIPTION_TIMEOUT", 3.0))
 
@@ -83,7 +83,9 @@ class Settings:
     noise_cancellation: bool = field(default_factory=lambda: _bool("NOISE_CANCELLATION", False))
     date_order: str = field(default_factory=lambda: _env("DATE_ORDER", "DMY"))
     agent_name: str = field(default_factory=lambda: _env("AGENT_NAME", "Ava"))
-    company_name: str = field(default_factory=lambda: _env("COMPANY_NAME", "Acme Store"))
+    timezone: str = field(
+        default_factory=lambda: _env("AGENT_TIMEZONE", "")
+    )  # e.g. Asia/Kolkata; "" = system
 
 
 def load_settings() -> Settings:

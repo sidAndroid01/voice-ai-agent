@@ -209,9 +209,12 @@ def normalize_for_speech(text: str, *, date_order: str = "DMY", lang: str = "en"
         if (
             "." not in raw
             and "," not in raw
-            and (_ID_CONTEXT.search(prefix) or digits.startswith("0") and len(digits) > 1 or len(digits) >= 7)
+            and (_ID_CONTEXT.search(prefix) or digits.startswith("0") and len(digits) > 1)
         ):
             return spell_digits(digits)
+        if "." not in raw and "," not in raw and len(digits) == 4 and 1100 <= int(digits) <= 2099:
+            # "1653" -> "sixteen fifty-three", "2024" -> "twenty twenty-four", "1500" -> "fifteen hundred"
+            return num2words(int(digits), to="year", lang="en")
         if "." in digits:
             whole, frac = digits.split(".", 1)
             return f"{_words(int(whole), lang)} point {' '.join(_DIGIT_WORDS[int(c)] for c in frac)}"
