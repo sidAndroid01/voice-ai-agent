@@ -25,6 +25,7 @@ from livekit.agents import (  # noqa: E402
     cli,
 )
 from livekit.agents.voice import room_io  # noqa: E402
+from livekit.plugins import noise_cancellation  # noqa: E402
 
 from .agent import VoiceAgent  # noqa: E402
 from .config import load_settings  # noqa: E402
@@ -205,8 +206,6 @@ async def entrypoint(ctx: JobContext) -> None:
 
     audio_input: room_io.AudioInputOptions | bool = True
     if settings.noise_cancellation:  # LiveKit Cloud enhanced noise cancellation (BVC)
-        from livekit.plugins import noise_cancellation
-
         audio_input = room_io.AudioInputOptions(
             noise_cancellation=noise_cancellation.BVC(),
             auto_gain_control=True,  # soft/loud talkers

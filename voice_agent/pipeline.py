@@ -19,6 +19,9 @@ from typing import Any
 from livekit.agents import inference, llm, stt, tts, vad
 from livekit.agents.voice.turn import TurnHandlingOptions
 
+# Plugins must be imported (registered) on the main thread at startup, never lazily inside a job.
+from livekit.plugins import anthropic, cartesia, deepgram, elevenlabs, openai
+
 from .config import Settings
 
 logger = logging.getLogger("voice-agent")
@@ -97,8 +100,6 @@ def build_vad() -> vad.VAD:
 def build_stt(s: Settings, vad_: vad.VAD | None = None) -> stt.STT:
     def make(provider: str, model: str) -> stt.STT:
         if provider == "deepgram":
-            from livekit.plugins import deepgram
-
             if model.startswith("flux"):  # STT-integrated end-of-turn detection
                 return deepgram.STTv2(model=model, keyterm=s.keyterms or [], eager_eot_threshold=0.5)
             return deepgram.STT(
@@ -111,8 +112,6 @@ def build_stt(s: Settings, vad_: vad.VAD | None = None) -> stt.STT:
                 keyterm=s.keyterms or [],
             )
         if provider == "openai":
-            from livekit.plugins import openai
-
             return openai.STT(model=model, language=s.language)
         if provider == "livekit":
             return inference.STT.from_model_string(model)
@@ -133,16 +132,10 @@ def build_stt(s: Settings, vad_: vad.VAD | None = None) -> stt.STT:
 def build_llm(s: Settings) -> llm.LLM:
     def make(provider: str, model: str) -> llm.LLM:
         if provider == "anthropic":
-            from livekit.plugins import anthropic
-
             return anthropic.LLM(model=model, temperature=0.4, caching="ephemeral")
         if provider == "openai":
-            from livekit.plugins import openai
-
             return openai.LLM(model=model, temperature=0.4)
         if provider == "ollama":
-            from livekit.plugins import openai
-
             _warm_ollama(model)
             return openai.LLM.with_ollama(
                 model=model,
@@ -168,20 +161,12 @@ def build_llm(s: Settings) -> llm.LLM:
 def build_tts(s: Settings) -> tts.TTS:
     def make(provider: str, model: str) -> tts.TTS:
         if provider == "cartesia":
-            from livekit.plugins import cartesia
-
             return cartesia.TTS(model=model, language=s.language if s.language != "multi" else "en")
         if provider == "deepgram":
-            from livekit.plugins import deepgram
-
             return deepgram.TTS(model=model)
         if provider == "elevenlabs":
-            from livekit.plugins import elevenlabs
-
             return elevenlabs.TTS(model=model)
         if provider == "openai":
-            from livekit.plugins import openai
-
             return openai.TTS(model=model)
         if provider == "livekit":
             return inference.TTS.from_model_string(model)
