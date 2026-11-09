@@ -34,7 +34,8 @@ class Settings:
     )
     tts_chain: list[str] = field(
         default_factory=lambda: _list(
-            "TTS_CHAIN", "cartesia:sonic-3,elevenlabs:eleven_flash_v2_5,openai:gpt-4o-mini-tts"
+            "TTS_CHAIN",
+            "deepgram:aura-2-andromeda-en,cartesia:sonic-3,elevenlabs:eleven_flash_v2_5,openai:gpt-4o-mini-tts",
         )
     )
     language: str = field(default_factory=lambda: _env("AGENT_LANGUAGE", "en"))

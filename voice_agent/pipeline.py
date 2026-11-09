@@ -123,6 +123,10 @@ def build_tts(s: Settings) -> tts.TTS:
             from livekit.plugins import cartesia
 
             return cartesia.TTS(model=model, language=s.language if s.language != "multi" else "en")
+        if provider == "deepgram":
+            from livekit.plugins import deepgram
+
+            return deepgram.TTS(model=model)
         if provider == "elevenlabs":
             from livekit.plugins import elevenlabs
 
