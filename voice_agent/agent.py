@@ -13,7 +13,8 @@ from livekit.agents import Agent, ChatContext, ChatMessage, StopResponse, llm
 from .config import Settings
 from .prompts import GREETING, system_prompt
 from .state import SessionState
-from .tools import ALL_TOOLS
+from .toolbox import ALL_TOOLS
+from .tools import say_then_hangup
 
 logger = logging.getLogger("voice-agent")
 
@@ -29,6 +30,26 @@ _SUMMARY_INSTRUCTIONS = (
 
 def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+
+
+# A whole user turn made only of closing words ends the session without asking the LLM.
+# Small local models often reply "Goodbye!" without calling end_call, leaving the session open.
+_GOODBYE = re.compile(
+    r"(?:\s*(?:ok(?:ay)?|alright|thanks?(?: you)?(?: so much)?|cool|great|bye(?:[- ]bye)?|good ?bye|"
+    r"see (?:you|ya)(?: later)?|that'?s (?:all|it)(?: for now)?|i'?m done|stop(?: it)?|"
+    r"end (?:this|the (?:call|chat|conversation|session))|talk (?:to you )?later|good ?night|"
+    r"ava)[\s,.!]*)+",
+    re.IGNORECASE,
+)
+_ENDS_WITH_FAREWELL = re.compile(
+    r"\b(bye|good ?bye|see (?:you|ya)|good ?night|that'?s all|i'?m done|stop|end (?:this|the))\b", re.I
+)
+
+
+def is_goodbye(text: str) -> bool:
+    """True for "okay thanks, bye", "that's all", "stop it"; False for "stop the timer" or "thanks"."""
+    t = text.strip()
+    return bool(t) and bool(_GOODBYE.fullmatch(t)) and bool(_ENDS_WITH_FAREWELL.search(t))
 
 
 def ignore_reason(user_text: str, last_agent_text: str | None) -> str | None:
@@ -91,6 +112,12 @@ class VoiceAgent(Agent):
             logger.info("ignored user turn", extra={"json": {"reason": reason}})
             raise StopResponse()
 
+        if is_goodbye(text) and not state.ending:
+            state.ending = True
+            logger.info("user said goodbye: ending session")
+            say_then_hangup(self.session, "Bye! Talk soon.")
+            raise StopResponse()
+
         state.user_turns += 1
         state.silence_prompts = 0
 
@@ -102,7 +129,15 @@ class VoiceAgent(Agent):
         if self._compacting or len(self.chat_ctx.items) <= self._settings.summarize_after_items:
             return
         self._compacting = True
-        asyncio.create_task(self._compact())
+        self._compact_task = asyncio.create_task(self._compact())
+
+    def cancel_compaction(self) -> None:
+        """The user started talking: free the LLM for their reply. On a local model (one request
+        at a time) a background summary would otherwise delay or time out the answer."""
+        task = getattr(self, "_compact_task", None)
+        if task and not task.done():
+            task.cancel()
+            logger.info("context compaction postponed: user is speaking")
 
     async def _compact(self) -> None:
         try:

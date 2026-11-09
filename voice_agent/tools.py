@@ -77,6 +77,26 @@ def _action_key(name: str, kwargs: dict[str, Any]) -> str:
     return f"{name}:{json.dumps(kwargs, sort_keys=True, default=str)}"
 
 
+def require_confirmation(ctx: RunContext[SessionState], name: str, kwargs: dict[str, Any]) -> str | None:
+    """Enforce confirmation in code: an action may run only if it was read back to the user in an
+    earlier turn and the user has spoken since. Returns the instruction for the LLM while the
+    action is still unconfirmed, or None once it may run (the pending entry is then consumed)."""
+    state = ctx.userdata
+    user_turn = count_user_turns(ctx.session.history)
+    key = _action_key(name, kwargs)
+    pending = state.pending_confirmations.get(key)
+    if pending is None or pending.user_turn >= user_turn:
+        summary = ", ".join(f"{k} {v}" for k, v in kwargs.items())
+        state.pending_confirmations[key] = PendingConfirmation(key=key, summary=summary, user_turn=user_turn)
+        return (
+            f"NOT EXECUTED YET. Read back the action ({name.replace('_', ' ')}: {summary}) "
+            "in plain words and ask the user to confirm. Call this tool again with the same "
+            "arguments only after the user clearly says yes."
+        )
+    state.pending_confirmations.pop(key, None)
+    return None
+
+
 def voice_tool(
     *,
     side_effect: bool = False,
@@ -95,7 +115,6 @@ def voice_tool(
             kwargs = {k: v for k, v in bound.arguments.items() if k != "ctx"}
             settings = load_settings()
             state = ctx.userdata
-            user_turn = count_user_turns(ctx.session.history)
             key = _action_key(name, kwargs)
             telemetry = TELEMETRY.get(state.call_id)
             if telemetry:
@@ -105,17 +124,9 @@ def voice_tool(
                 return f"Already completed earlier in this call: {state.completed_actions[key]}"
 
             if confirm:
-                pending = state.pending_confirmations.get(key)
-                if pending is None or pending.user_turn >= user_turn:
-                    summary = ", ".join(f"{k} {v}" for k, v in kwargs.items())
-                    state.pending_confirmations[key] = PendingConfirmation(
-                        key=key, summary=summary, user_turn=user_turn
-                    )
-                    return (
-                        f"NOT EXECUTED YET. Read back the action ({name.replace('_', ' ')}: {summary}) "
-                        "and ask the user to confirm. Call this tool again with the same arguments "
-                        "only after the user clearly says yes."
-                    )
+                pending_msg = require_confirmation(ctx, name, kwargs)
+                if pending_msg:
+                    return pending_msg
 
             # never start an irreversible action for a reply the user already talked over
             if side_effect and ctx.speech_handle.interrupted:
@@ -196,17 +207,16 @@ async def end_call(ctx: RunContext[SessionState], farewell: str) -> None:
     if state.ending:
         return None
     state.ending = True
-    _say_then_hangup(ctx, farewell)
+    say_then_hangup(ctx.session, farewell)
     return None
 
 
-def _say_then_hangup(ctx: RunContext[SessionState], text: str) -> None:
+def say_then_hangup(session: Any, text: str) -> None:
     """Queue the last words and hang up after they finish playing.
 
     Must not be awaited inside the tool: the queued speech plays only after the tool's
     own turn completes, so awaiting it from the tool would deadlock.
     """
-    session = ctx.session
     handle = session.say(text, allow_interruptions=False)
 
     async def _run() -> None:
@@ -229,6 +239,3 @@ def _hangup(session: Any) -> None:
         get_job_context().delete_room()
     except RuntimeError:  # no job context (tests / console)
         pass
-
-
-ALL_TOOLS = [get_current_datetime, end_call]

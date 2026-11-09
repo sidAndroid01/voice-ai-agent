@@ -286,3 +286,82 @@ def speech_normalizer(
             yield norm(buf)
 
     return transform
+
+
+# Stock sign-offs small models append to every reply. Spoken aloud they make a voice assistant
+# sound like a call center, so they are dropped from speech (they stay in the transcript).
+_CLOSER_OPENERS = (
+    "is there anything else",
+    "anything else i can",
+    "let me know if",
+    "just let me know",
+    "feel free to",
+    "i'm here to help",
+    "i am here to help",
+    "hope this helps",
+    "hope that helps",
+    "happy to help",
+    "if you need anything",
+    "if you have any other",
+    "if you have any more",
+    "do you need anything else",
+    "would you like to know more",
+    "would you like more details",
+)
+_SENTENCE_END = re.compile(r"[.!?](?:\s|$)|\n")
+
+
+def _could_be_closer(start: str) -> tuple[bool, bool]:
+    """(still possible, definitely a closer) for the lowercased start of a sentence."""
+    start = start.lstrip().lower().replace("\u2019", "'")
+    possible = any(op.startswith(start) or start.startswith(op) for op in _CLOSER_OPENERS)
+    definite = any(start.startswith(op) for op in _CLOSER_OPENERS)
+    return possible, definite
+
+
+def drop_sign_offs() -> Callable[[AsyncIterable[Any]], AsyncIterator[Any]]:
+    """Streaming TTS transform that removes stock closing sentences ("Is there anything else I
+    can help with?"). Only sentences that start like a sign-off are held back, so normal speech
+    streams through with no added delay. A reply that is nothing but a sign-off is kept."""
+
+    async def transform(stream: AsyncIterable[Any]) -> AsyncIterator[Any]:
+        buf, passing, emitted = "", False, False
+        async for chunk in stream:
+            if not isinstance(chunk, str):
+                if buf:
+                    yield buf
+                buf, passing, emitted = "", False, False
+                yield chunk
+                continue
+            buf += chunk
+            while buf:
+                if passing:
+                    m = _SENTENCE_END.search(buf)
+                    if not m:
+                        yield buf
+                        buf = ""
+                        break
+                    yield buf[: m.end()]
+                    buf, passing, emitted = buf[m.end() :], False, True
+                    continue
+                if not buf.strip():
+                    break
+                possible, definite = _could_be_closer(buf)
+                if not possible:
+                    passing = True
+                    continue
+                m = _SENTENCE_END.search(buf)
+                if definite and m:
+                    sentence, buf = buf[: m.end()], buf[m.end() :]
+                    if not emitted:  # the whole reply would be empty: keep it
+                        yield sentence
+                        emitted = True
+                    continue
+                if m:  # sentence ended before it could be told apart: it wasn't a closer
+                    passing = True
+                    continue
+                break  # wait for more text
+        if buf and not (emitted and _could_be_closer(buf)[1]):
+            yield buf
+
+    return transform

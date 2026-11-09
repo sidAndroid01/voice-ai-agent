@@ -41,7 +41,9 @@ class Settings:
         )
     )
     language: str = field(default_factory=lambda: _env("AGENT_LANGUAGE", "en"))
-    keyterms: list[str] = field(default_factory=lambda: _list("STT_KEYTERMS", ""))
+    keyterms: list[str] = field(
+        default_factory=lambda: _list("STT_KEYTERMS", "Ava,bash,terminal,Ollama,Wi-Fi,macOS")
+    )
 
     # --- turn taking ---
     # "semantic": LiveKit streaming end-of-turn model (cloud v1, local mini fallback)
@@ -68,11 +70,18 @@ class Settings:
     max_silence_prompts: int = field(default_factory=lambda: int(_env("MAX_SILENCE_PROMPTS", "0")))
     max_call_duration: float = field(default_factory=lambda: _float("MAX_CALL_DURATION", 1800.0))
     transcription_timeout: float = field(default_factory=lambda: _float("TRANSCRIPTION_TIMEOUT", 3.0))
+    # say "Sorry, I didn't catch that" when VAD heard sound but STT got no words. Off by default:
+    # on speakers it mostly fires on the agent's own echo or background noise.
+    stt_timeout_prompt: bool = field(default_factory=lambda: _bool("STT_TIMEOUT_PROMPT", False))
 
     # --- tools ---
     tool_timeout: float = field(default_factory=lambda: _float("TOOL_TIMEOUT", 8.0))
     tool_filler_delay: float = field(default_factory=lambda: _float("TOOL_FILLER_DELAY", 0.7))
     max_tool_steps: int = field(default_factory=lambda: int(_env("MAX_TOOL_STEPS", "4")))
+
+    shell_tool: bool = field(default_factory=lambda: _bool("SHELL_TOOL", True))
+    shell_timeout: float = field(default_factory=lambda: _float("SHELL_TIMEOUT", 20.0))
+    temperature_unit: str = field(default_factory=lambda: _env("TEMPERATURE_UNIT", "celsius"))
 
     # --- context management ---
     summarize_after_items: int = field(default_factory=lambda: int(_env("SUMMARIZE_AFTER_ITEMS", "30")))

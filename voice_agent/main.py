@@ -29,7 +29,7 @@ from livekit.plugins import noise_cancellation  # noqa: E402
 
 from .agent import VoiceAgent  # noqa: E402
 from .config import load_settings  # noqa: E402
-from .normalize import speech_normalizer  # noqa: E402
+from .normalize import drop_sign_offs, speech_normalizer  # noqa: E402
 from .pipeline import build_llm, build_stt, build_tts, build_turn_handling, build_vad  # noqa: E402
 from .prompts import (  # noqa: E402
     MAX_DURATION_PROMPT,
@@ -39,6 +39,7 @@ from .prompts import (  # noqa: E402
 )
 from .state import CheckpointStore, SessionState  # noqa: E402
 from .telemetry import SessionTelemetry, redact, setup_logging  # noqa: E402
+from .toolbox import cancel_timers  # noqa: E402
 from .tools import TELEMETRY  # noqa: E402
 
 logger = logging.getLogger("voice-agent")
@@ -78,6 +79,7 @@ async def entrypoint(ctx: JobContext) -> None:
         tts_text_transforms=[
             "filter_markdown",
             "filter_emoji",
+            drop_sign_offs(),
             speech_normalizer(date_order=settings.date_order, lang=settings.language),
         ],
         user_away_timeout=settings.user_away_timeout,
@@ -139,7 +141,7 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_stt_timeout(ev) -> None:
         # VAD heard speech but STT produced nothing (STT hiccup / audio withheld)
         telemetry.stt_timeouts += 1
-        if not state.ending:
+        if settings.stt_timeout_prompt and not state.ending:
             session.say(STT_TIMEOUT_PROMPT)
 
     # ------------------------------------------------------------------ silence handling
@@ -161,6 +163,8 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("user_state_changed")
     def _on_user_state(ev) -> None:
         nonlocal silence_task
+        if ev.new_state == "speaking":
+            agent.cancel_compaction()
         if settings.max_silence_prompts <= 0:  # assistant mode: just wait quietly
             return
         if ev.new_state == "away" and session.agent_state != "speaking":
@@ -189,6 +193,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # ------------------------------------------------------------------ shutdown
     async def on_shutdown() -> None:
         guard.cancel()
+        cancel_timers(call_id)
         if silence_task:
             silence_task.cancel()
         logger.info("session summary", extra={"json": telemetry.summary()})

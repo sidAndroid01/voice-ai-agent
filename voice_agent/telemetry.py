@@ -23,8 +23,9 @@ logger = logging.getLogger("voice-agent.telemetry")
 
 _CARD = re.compile(r"\b(?:\d[ -]?){13,19}\b")
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-_PHONE = re.compile(r"(?<!\w)\+?\d[\d\s().-]{7,}\d(?!\w)")
-_LONG_DIGITS = re.compile(r"\b\d{6,}\b")
+_PHONE = re.compile(r"(?<![\w.])\+?\d[\d\s().-]{7,}\d(?![\w]|\.\d)")
+_DECIMAL = re.compile(r"\d+\.\d+")  # timestamps, measurements: not phone numbers
+_LONG_DIGITS = re.compile(r"(?<!\.)\b\d{6,}\b(?!\.\d)")
 # Spoken digit runs coming out of STT: "four five six seven eight nine"
 _SPOKEN_DIGITS = re.compile(
     r"\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)[\s,-]+){5,}"
@@ -53,7 +54,7 @@ def redact(text: str) -> str:
 
     text = _CARD.sub(card, text)
     text = _EMAIL.sub("[EMAIL]", text)
-    text = _PHONE.sub("[PHONE]", text)
+    text = _PHONE.sub(lambda m: m.group(0) if _DECIMAL.fullmatch(m.group(0)) else "[PHONE]", text)
     text = _LONG_DIGITS.sub("[NUMBER]", text)
     text = _SPOKEN_DIGITS.sub("[NUMBER]", text)
     return text
