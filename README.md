@@ -41,14 +41,14 @@ Every stage streams and stages overlap. The LLM starts drafting a reply *before*
 | VAD | Silero (local) | < 1 ms per frame |
 | Turn detection | LiveKit semantic turn detector | Tells a pause from a finished thought |
 | STT | Deepgram Nova-3 → OpenAI gpt-4o-mini-transcribe | Streaming, keyword boosting |
-| LLM | Claude Haiku 4.5 (prompt-cached) → GPT-4.1-mini | Fails over if the first token takes > 3 s |
-| TTS | Cartesia Sonic-3 → ElevenLabs Flash → OpenAI | Lowest time-to-first-audio first |
+| LLM | **Local** Qwen3-8B via Ollama (thinking off) → Claude Haiku 4.5 → GPT-4.1-mini | Runs on your machine with no key; cloud models are optional failover |
+| TTS | Deepgram Aura-2 → Cartesia Sonic-3 → ElevenLabs Flash → OpenAI | One Deepgram key covers STT and TTS |
 
 Providers without an API key are skipped automatically, and any extra keys become failover. Each chain can be changed in `.env` without touching code (`STT_CHAIN`, `LLM_CHAIN`, `TTS_CHAIN`).
 
 ## Quick start
 
-**Requirements:** Python 3.12, [uv](https://docs.astral.sh/uv/), a [LiveKit Cloud](https://cloud.livekit.io) project (the free tier is fine), and at least one STT, one LLM and one TTS key.
+**Requirements:** Python 3.12, [uv](https://docs.astral.sh/uv/), a [Deepgram](https://deepgram.com) key (speech in and out), and [Ollama](https://ollama.com) with `ollama pull qwen3:8b` (local LLM). Console mode needs nothing else. A [LiveKit Cloud](https://cloud.livekit.io) project (free tier) or `livekit-server --dev` is needed only for browser and app clients.
 
 ```bash
 git clone https://github.com/sidAndroid01/voice-ai-agent.git

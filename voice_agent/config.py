@@ -30,7 +30,9 @@ class Settings:
         default_factory=lambda: _list("STT_CHAIN", "deepgram:nova-3,openai:gpt-4o-mini-transcribe")
     )
     llm_chain: list[str] = field(
-        default_factory=lambda: _list("LLM_CHAIN", "anthropic:claude-haiku-4-5,openai:gpt-4.1-mini")
+        default_factory=lambda: _list(
+            "LLM_CHAIN", "ollama:qwen3:8b,anthropic:claude-haiku-4-5,openai:gpt-4.1-mini"
+        )
     )
     tts_chain: list[str] = field(
         default_factory=lambda: _list(
